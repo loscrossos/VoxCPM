@@ -14,30 +14,49 @@ from .model.utils import next_and_close
 def resolve_model_path(
     path_or_id: str,
     cache_dir: str | None = None,
-    local_files_only: bool = False,
+    local_files_only: bool = True,
 ) -> str:
     """Resolve a model path: return as-is if it's a local directory,
-    otherwise download from HuggingFace Hub via ``snapshot_download()``.
-
-    This is the single shared helper used by both
-    :meth:`VoxCPM.from_pretrained` (inference) and the training WebUI.
+    otherwise resolve from local checkpoints/ directory for strict offline operation.
 
     Args:
-        path_or_id: Local directory path **or** HuggingFace Hub repo ID
-            (e.g. ``"openbmb/VoxCPM2"``).
-        cache_dir: Optional cache directory forwarded to
-            ``snapshot_download()``.
-        local_files_only: When *True*, never attempt a network download.
+        path_or_id: Local directory path or model identifier (e.g. "openbmb/VoxCPM2" or "VoxCPM2").
+        cache_dir: Optional cache directory.
+        local_files_only: When True, never attempt a network download.
 
     Returns:
         Absolute local filesystem path to the model directory.
     """
     if os.path.isdir(path_or_id):
-        return path_or_id
-    return snapshot_download(
-        repo_id=path_or_id,
-        cache_dir=cache_dir,
-        local_files_only=local_files_only,
+        return os.path.abspath(path_or_id)
+
+    # Check local checkpoints/ folder at VoxCPM repository root
+    repo_root = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", ".."))
+    checkpoints_dir = os.path.join(repo_root, "checkpoints")
+
+    clean_id = path_or_id.replace("/", os.sep).split(os.sep)[-1]
+    candidate = os.path.join(checkpoints_dir, clean_id)
+    if os.path.isdir(candidate):
+        return os.path.abspath(candidate)
+
+    if os.path.isdir(checkpoints_dir) and os.path.isfile(os.path.join(checkpoints_dir, "config.json")):
+        return os.path.abspath(checkpoints_dir)
+
+    # If offline files not found, check snapshot_download only if local_files_only is False
+    if not local_files_only:
+        try:
+            return snapshot_download(
+                repo_id=path_or_id,
+                cache_dir=cache_dir,
+                local_files_only=False,
+            )
+        except Exception:
+            pass
+
+    raise FileNotFoundError(
+        f"VoxCPM offline checkpoint directory not found for '{path_or_id}'. "
+        f"Checked: '{candidate}' and '{checkpoints_dir}'. "
+        f"Please download model assets into '{checkpoints_dir}' before running offline."
     )
 
 
